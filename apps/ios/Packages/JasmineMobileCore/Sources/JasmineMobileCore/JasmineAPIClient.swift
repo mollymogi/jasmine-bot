@@ -74,6 +74,8 @@ public actor JasmineAPIClient {
             let cfg = URLSessionConfiguration.default
             cfg.timeoutIntervalForRequest = 15
             cfg.timeoutIntervalForResource = 300
+            cfg.httpShouldSetCookies = false
+            cfg.httpCookieAcceptPolicy = .never
             self.urlSession = URLSession(configuration: cfg)
         }
     }
@@ -218,6 +220,7 @@ public actor JasmineAPIClient {
             req.httpMethod = method
             req.setValue("Bearer \(creds.sessionToken)", forHTTPHeaderField: "Authorization")
             req.setValue("ios-native", forHTTPHeaderField: "X-Jasmine-Client")
+            req.setValue(origin, forHTTPHeaderField: "Origin")
             if let jsonBody {
                 req.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 req.httpBody = try JSONSerialization.data(withJSONObject: jsonBody)
@@ -268,12 +271,38 @@ public actor JasmineAPIClient {
     public func sendMessage(roomId: String, text: String, attachmentPaths: [String] = []) async throws {
         var payload: [String: Any] = ["text": text]
         if !attachmentPaths.isEmpty {
-            payload["files"] = attachmentPaths
+            payload["referenceFilePaths"] = attachmentPaths
         }
         _ = try await authorizedRequest(
             path: "/api/chatrooms/\(roomId)/messages",
             method: "POST",
             jsonBody: payload
+        )
+    }
+
+    public func fetchRoomMediaData(roomId: String, filePath: String, thumbnail: Bool = false, maxWidth: Int = 720) async throws -> Data {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=?")
+        let encodedPath = filePath.addingPercentEncoding(withAllowedCharacters: allowed) ?? filePath
+        let thumbQuery = thumbnail ? "&thumb=1&w=\(maxWidth)" : ""
+        return try await authorizedRequest(path: "/api/chatrooms/\(roomId)/file-raw?path=\(encodedPath)\(thumbQuery)")
+    }
+
+    public func resolveRoomMediaStreamInfo(roomId: String, filePath: String) async throws -> (url: URL, headers: [String: String]) {
+        guard let creds = credentials else { throw JasmineClientError.unauthorized }
+        let origin = try await resolveOrigin()
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=?")
+        let encodedPath = filePath.addingPercentEncoding(withAllowedCharacters: allowed) ?? filePath
+        guard let url = URL(string: "\(origin)/api/chatrooms/\(roomId)/file-raw?path=\(encodedPath)") else {
+            throw JasmineClientError.serverError(400, "无效的媒体地址")
+        }
+        return (
+            url: url,
+            headers: [
+                "Authorization": "Bearer \(creds.sessionToken)",
+                "Origin": origin
+            ]
         )
     }
 

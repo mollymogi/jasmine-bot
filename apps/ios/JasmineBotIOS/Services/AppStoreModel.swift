@@ -49,19 +49,23 @@ public final class AppStoreModel {
         requestNotificationPermission()
     }
 
-    private func startNetworkPathWatcher() {
-        pathMonitor.pathUpdateHandler = { [weak self] path in
+    private nonisolated func startNetworkPathWatcher() {
+        let monitor = self.pathMonitor
+        let queue = self.monitorQueue
+        monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.credentials != nil else { return }
                 await self.reraceRoutesSilently()
             }
         }
-        pathMonitor.start(queue: monitorQueue)
+        monitor.start(queue: queue)
     }
 
-    private func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+    private nonisolated func requestNotificationPermission() {
+        Task.detached {
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
+        }
     }
 
     // MARK: - Pairing & Sign Out

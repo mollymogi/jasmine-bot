@@ -45,6 +45,8 @@ struct ChatRoomDetailView: View {
                     LazyVStack(spacing: 14) {
                         ForEach(messages) { msg in
                             MessageBubbleView(
+                                store: store,
+                                roomId: roomSummary.id,
                                 message: msg,
                                 member: members.first { $0.id == msg.memberId }
                             )
@@ -71,7 +73,7 @@ struct ChatRoomDetailView: View {
                     HStack(spacing: 8) {
                         ForEach(members) { m in
                             Button {
-                                let mention = "@\(m.id) "
+                                let mention = "@\(m.name) "
                                 if !inputText.contains(mention) {
                                     inputText = mention + inputText
                                 }
@@ -287,23 +289,39 @@ struct ChatRoomDetailView: View {
 }
 
 private struct MessageBubbleView: View {
+    let store: AppStoreModel
+    let roomId: String
     let message: ChatMessageItem
     let member: RoomMemberItem?
+
+    private var mediaItems: [RoomMediaAttachment] {
+        message.extractedMediaAttachments
+    }
+
+    private var formattedBody: String {
+        message.cleanedMarkdownBody
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             if message.isUser {
-                Spacer(minLength: 44)
-                Text(message.displayBody)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18))
+                Spacer(minLength: 40)
+                VStack(alignment: .trailing, spacing: 6) {
+                    if !formattedBody.isEmpty {
+                        MarkdownMessageView(rawText: formattedBody, isUserBubble: true)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18))
+                    }
+                    if !mediaItems.isEmpty {
+                        MessageMediaStripView(store: store, roomId: roomId, attachments: mediaItems)
+                    }
+                }
             } else {
                 BrandAvatarView(brand: member?.brand ?? .generic, size: 30)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 6) {
                         Text(member?.name ?? message.speaker ?? "Bot")
                             .font(.caption.weight(.semibold))
@@ -337,9 +355,8 @@ private struct MessageBubbleView: View {
                         .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
                     }
 
-                    if !message.displayBody.isEmpty {
-                        Text(message.displayBody)
-                            .font(.body)
+                    if !formattedBody.isEmpty {
+                        MarkdownMessageView(rawText: formattedBody, isUserBubble: false)
                             .textSelection(.enabled)
                             .padding(.horizontal, 13)
                             .padding(.vertical, 10)
@@ -351,13 +368,17 @@ private struct MessageBubbleView: View {
                             .italic()
                     }
 
+                    if !mediaItems.isEmpty {
+                        MessageMediaStripView(store: store, roomId: roomId, attachments: mediaItems)
+                    }
+
                     if let err = message.error, !err.isEmpty {
                         Text(err)
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
                 }
-                Spacer(minLength: 24)
+                Spacer(minLength: 16)
             }
         }
     }

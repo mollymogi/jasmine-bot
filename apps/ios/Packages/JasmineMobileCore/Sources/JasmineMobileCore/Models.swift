@@ -215,9 +215,83 @@ public struct PhaseReplyItem: Codable, Hashable, Identifiable, Sendable {
     public let at: String?
 }
 
+public enum MediaAttachmentKind: String, Codable, Hashable, Sendable {
+    case image
+    case video
+    case audio
+    case file
+
+    public static func classify(filePath: String, extHint: String? = nil) -> MediaAttachmentKind {
+        let rawExt = (extHint ?? (filePath as NSString).pathExtension)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        switch rawExt {
+        case "png", "jpg", "jpeg", "webp", "gif", "heic", "bmp":
+            return .image
+        case "mp4", "mov", "m4v", "webm", "mkv":
+            return .video
+        case "mp3", "wav", "m4a", "aac", "flac", "ogg":
+            return .audio
+        default:
+            return .file
+        }
+    }
+}
+
+public struct RoomMediaAttachment: Codable, Hashable, Identifiable, Sendable {
+    public var id: String { path }
+    public let path: String
+    public let name: String
+    public let ext: String
+    public let kind: MediaAttachmentKind
+
+    public init(path: String, name: String? = nil, ext: String? = nil) {
+        let cleanedPath = Self.normalizeLocalPath(path)
+        self.path = cleanedPath
+        let inferredName = (cleanedPath as NSString).lastPathComponent
+        self.name = (name?.isEmpty == false ? name! : inferredName)
+        let inferredExt = ext ?? (cleanedPath as NSString).pathExtension.lowercased()
+        self.ext = inferredExt
+        self.kind = MediaAttachmentKind.classify(filePath: cleanedPath, extHint: inferredExt)
+    }
+
+    public static func normalizeLocalPath(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.lowercased().hasPrefix("file://") {
+            if let url = URL(string: s), url.isFileURL {
+                return url.path
+            }
+            s = String(s.dropFirst("file://".count))
+            return s.removingPercentEncoding ?? s
+        }
+        return s.removingPercentEncoding ?? s
+    }
+}
+
+public enum MarkdownBlock: Equatable, Identifiable, Sendable {
+    case heading(level: Int, text: String)
+    case paragraph(String)
+    case codeBlock(language: String?, code: String)
+    case blockquote(String)
+    case listItem(bullet: String, text: String)
+    case table(headers: [String], rows: [[String]])
+
+    public var id: String {
+        switch self {
+        case .heading(let l, let t): return "h\(l):\(t.prefix(32))"
+        case .paragraph(let t): return "p:\(t.prefix(32))"
+        case .codeBlock(let lang, let c): return "code:\(lang ?? ""):\(c.prefix(32))"
+        case .blockquote(let t): return "q:\(t.prefix(32))"
+        case .listItem(let b, let t): return "li:\(b):\(t.prefix(32))"
+        case .table(let h, let r): return "tbl:\(h.joined()):\(r.count)"
+        }
+    }
+}
+
 public struct ChatMessageItem: Codable, Hashable, Identifiable, Sendable {
     public let id: String
     public let role: String?
+    public let senderKind: String?
     public let memberId: String?
     public let speaker: String?
     public let status: String?
@@ -227,6 +301,37 @@ public struct ChatMessageItem: Codable, Hashable, Identifiable, Sendable {
     public let createdAt: String?
     public let updatedAt: String?
     public let phaseReplies: [PhaseReplyItem]?
+    public let referenceFiles: [RoomMediaAttachment]?
+
+    public init(
+        id: String,
+        role: String? = nil,
+        senderKind: String? = nil,
+        memberId: String? = nil,
+        speaker: String? = nil,
+        status: String? = nil,
+        text: String? = nil,
+        content: String? = nil,
+        error: String? = nil,
+        createdAt: String? = nil,
+        updatedAt: String? = nil,
+        phaseReplies: [PhaseReplyItem]? = nil,
+        referenceFiles: [RoomMediaAttachment]? = nil
+    ) {
+        self.id = id
+        self.role = role
+        self.senderKind = senderKind
+        self.memberId = memberId
+        self.speaker = speaker
+        self.status = status
+        self.text = text
+        self.content = content
+        self.error = error
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.phaseReplies = phaseReplies
+        self.referenceFiles = referenceFiles
+    }
 
     public var displayBody: String {
         let primary = (text ?? content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -238,12 +343,225 @@ public struct ChatMessageItem: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var isUser: Bool {
-        memberId == nil && (role == nil || role == "user")
+        if senderKind == "user" { return true }
+        if senderKind == "agent" { return false }
+        return memberId == nil && (role == nil || role == "user")
     }
 
     public var isWorking: Bool {
         guard let s = status?.lowercased() else { return false }
         return s == "working" || s == "sending" || s == "streaming" || s == "queued"
+    }
+
+    /// Extracts all explicit `referenceFiles` plus inline `file:///...` or `/Users/...` `/Volumes/...` media paths.
+    public var extractedMediaAttachments: [RoomMediaAttachment] {
+        var result: [RoomMediaAttachment] = []
+        var seen = Set<String>()
+        for item in referenceFiles ?? [] where item.kind == .image || item.kind == .video || item.kind == .audio {
+            if seen.insert(item.path).inserted {
+                result.append(item)
+            }
+        }
+        let body = displayBody
+        guard !body.isEmpty else { return result }
+
+        // 1) Match file:///... links inside Markdown or parentheses
+        let fileUrlPattern = #"file://(/[^\s\)\]>\"'`]+)"#
+        if let regex = try? NSRegularExpression(pattern: fileUrlPattern) {
+            let ns = body as NSString
+            for m in regex.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+                let raw = ns.substring(with: m.range)
+                let att = RoomMediaAttachment(path: raw)
+                if (att.kind == .image || att.kind == .video || att.kind == .audio), seen.insert(att.path).inserted {
+                    result.append(att)
+                }
+            }
+        }
+
+        // 2) Match bare absolute media paths (/Users/... or /Volumes/...)
+        let absPathPattern = #"(?:/Users/|/Volumes/)[^\s\)\]>\"'`,;，。；]+\.(?:mp4|mov|m4v|webm|png|jpg|jpeg|webp|gif|mp3|wav)"#
+        if let regex = try? NSRegularExpression(pattern: absPathPattern, options: [.caseInsensitive]) {
+            let ns = body as NSString
+            for m in regex.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+                let raw = ns.substring(with: m.range)
+                let att = RoomMediaAttachment(path: raw)
+                if (att.kind == .image || att.kind == .video || att.kind == .audio), seen.insert(att.path).inserted {
+                    result.append(att)
+                }
+            }
+        }
+        return result
+    }
+
+    /// Replaces verbose `[label](file:///long/path/foo.mp4)` links with concise readable badges so bubbles stay tidy.
+    public var cleanedMarkdownBody: String {
+        var text = displayBody
+        guard !text.isEmpty else { return "" }
+
+        // Replace Markdown `[label](file:///...)` or `[label](</abs/path>)`
+        let mdFileLinkPattern = #"\[([^\]]+)\]\(\s*<?(?:file://)?(/[^>\)\s]+)>?\s*\)"#
+        if let regex = try? NSRegularExpression(pattern: mdFileLinkPattern) {
+            let ns = text as NSString
+            var out = ""
+            var lastLoc = 0
+            for m in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                out += ns.substring(with: NSRange(location: lastLoc, length: m.range.location - lastLoc))
+                let label = ns.substring(with: m.range(at: 1))
+                let pathStr = RoomMediaAttachment.normalizeLocalPath(ns.substring(with: m.range(at: 2)))
+                let kind = MediaAttachmentKind.classify(filePath: pathStr)
+                let icon = kind == .video ? "🎬" : (kind == .image ? "🖼️" : "📄")
+                out += "`\(icon) \(label)`"
+                lastLoc = m.range.location + m.range.length
+            }
+            out += ns.substring(from: lastLoc)
+            text = out
+        }
+
+        // Replace bare `(file:///...)` or `file:///...`
+        let bareFileUrlPattern = #"\(?file://(/[^\s\)\]>\"'`]+)\)?"#
+        if let regex = try? NSRegularExpression(pattern: bareFileUrlPattern) {
+            let ns = text as NSString
+            var out = ""
+            var lastLoc = 0
+            for m in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                out += ns.substring(with: NSRange(location: lastLoc, length: m.range.location - lastLoc))
+                let pathStr = RoomMediaAttachment.normalizeLocalPath(ns.substring(with: m.range(at: 1)))
+                let baseName = (pathStr as NSString).lastPathComponent
+                let kind = MediaAttachmentKind.classify(filePath: pathStr)
+                let icon = kind == .video ? "🎬" : (kind == .image ? "🖼️" : "📄")
+                out += "`\(icon) \(baseName)`"
+                lastLoc = m.range.location + m.range.length
+            }
+            out += ns.substring(from: lastLoc)
+            text = out
+        }
+
+        return text
+    }
+
+    public static func parseMarkdownBlocks(_ raw: String) -> [MarkdownBlock] {
+        let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized.components(separatedBy: "\n")
+        var blocks: [MarkdownBlock] = []
+        var idx = 0
+        var paragraphBuffer: [String] = []
+
+        func flushParagraph() {
+            let joined = paragraphBuffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty {
+                blocks.append(.paragraph(joined))
+            }
+            paragraphBuffer.removeAll(keepingCapacity: true)
+        }
+
+        while idx < lines.count {
+            let line = lines[idx]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Fenced code block ```
+            if trimmed.hasPrefix("```") {
+                flushParagraph()
+                let lang = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                var codeLines: [String] = []
+                idx += 1
+                while idx < lines.count {
+                    if lines[idx].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                        idx += 1
+                        break
+                    }
+                    codeLines.append(lines[idx])
+                    idx += 1
+                }
+                blocks.append(.codeBlock(language: lang.isEmpty ? nil : lang, code: codeLines.joined(separator: "\n")))
+                continue
+            }
+
+            // Markdown table
+            if trimmed.hasPrefix("|"), idx + 1 < lines.count {
+                let nextTrimmed = lines[idx + 1].trimmingCharacters(in: .whitespaces)
+                if nextTrimmed.hasPrefix("|") && nextTrimmed.contains("---") {
+                    flushParagraph()
+                    let parseRow: (String) -> [String] = { row in
+                        var s = row.trimmingCharacters(in: .whitespaces)
+                        if s.hasPrefix("|") { s.removeFirst() }
+                        if s.hasSuffix("|") { s.removeLast() }
+                        return s.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+                    }
+                    let headers = parseRow(trimmed)
+                    var rows: [[String]] = []
+                    idx += 2
+                    while idx < lines.count {
+                        let rline = lines[idx].trimmingCharacters(in: .whitespaces)
+                        guard rline.hasPrefix("|") else { break }
+                        rows.append(parseRow(rline))
+                        idx += 1
+                    }
+                    blocks.append(.table(headers: headers, rows: rows))
+                    continue
+                }
+            }
+
+            if trimmed.isEmpty {
+                flushParagraph()
+                idx += 1
+                continue
+            }
+
+            // ATX Heading # .. ####
+            if let headingMatch = trimmed.range(of: #"^(#{1,4})\s+(.+)$"#, options: .regularExpression) {
+                let full = String(trimmed[headingMatch])
+                let hashes = full.prefix { $0 == "#" }
+                let title = full.dropFirst(hashes.count).trimmingCharacters(in: .whitespaces)
+                flushParagraph()
+                blocks.append(.heading(level: hashes.count, text: title))
+                idx += 1
+                continue
+            }
+
+            // Horizontal rule ---
+            if trimmed == "---" || trimmed == "***" {
+                flushParagraph()
+                idx += 1
+                continue
+            }
+
+            // Blockquote >
+            if trimmed.hasPrefix(">") {
+                flushParagraph()
+                var quoteLines: [String] = []
+                while idx < lines.count {
+                    let ql = lines[idx].trimmingCharacters(in: .whitespaces)
+                    guard ql.hasPrefix(">") else { break }
+                    var content = String(ql.dropFirst())
+                    if content.hasPrefix(" ") { content.removeFirst() }
+                    quoteLines.append(content)
+                    idx += 1
+                }
+                blocks.append(.blockquote(quoteLines.joined(separator: "\n")))
+                continue
+            }
+
+            // Bullet or numbered list item
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("• ") {
+                flushParagraph()
+                blocks.append(.listItem(bullet: "•", text: String(trimmed.dropFirst(2))))
+                idx += 1
+                continue
+            }
+            if let numRange = trimmed.range(of: #"^\d+\.\s+"#, options: .regularExpression) {
+                flushParagraph()
+                let prefix = String(trimmed[numRange]).trimmingCharacters(in: .whitespaces)
+                let rest = String(trimmed[numRange.upperBound...])
+                blocks.append(.listItem(bullet: prefix, text: rest))
+                idx += 1
+                continue
+            }
+
+            paragraphBuffer.append(line)
+            idx += 1
+        }
+        flushParagraph()
+        return blocks
     }
 }
 
@@ -290,6 +608,7 @@ public struct ChatRoomMessageEnvelope: Codable, Sendable {
         let c = try decoder.container(keyedBy: DynamicKey.self)
         let id = (try? c.decode(String.self, forKey: DynamicKey("id"))) ?? UUID().uuidString
         let role = try? c.decode(String.self, forKey: DynamicKey("role"))
+        let senderKind = try? c.decode(String.self, forKey: DynamicKey("senderKind"))
         let memberId = try? c.decode(String.self, forKey: DynamicKey("memberId"))
         let speaker = (try? c.decode(String.self, forKey: DynamicKey("speaker")))
             ?? (try? c.decode(String.self, forKey: DynamicKey("memberName")))
@@ -301,9 +620,22 @@ public struct ChatRoomMessageEnvelope: Codable, Sendable {
         let updatedAt = try? c.decode(String.self, forKey: DynamicKey("updatedAt"))
         let phases = (try? c.decode([PhaseReplyItem].self, forKey: DynamicKey("phaseReplies")))
             ?? (try? c.decode([PhaseReplyItem].self, forKey: DynamicKey("intermediateReplies")))
+
+        struct RawRefFile: Decodable {
+            let path: String?
+            let name: String?
+            let ext: String?
+        }
+        let rawRefs = (try? c.decode([RawRefFile].self, forKey: DynamicKey("referenceFiles"))) ?? []
+        let parsedRefs = rawRefs.compactMap { rf -> RoomMediaAttachment? in
+            guard let p = rf.path, !p.isEmpty else { return nil }
+            return RoomMediaAttachment(path: p, name: rf.name, ext: rf.ext)
+        }
+
         self.item = ChatMessageItem(
             id: id,
             role: role,
+            senderKind: senderKind,
             memberId: memberId,
             speaker: speaker,
             status: status,
@@ -312,7 +644,8 @@ public struct ChatRoomMessageEnvelope: Codable, Sendable {
             error: error,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            phaseReplies: phases
+            phaseReplies: phases,
+            referenceFiles: parsedRefs.isEmpty ? nil : parsedRefs
         )
     }
 

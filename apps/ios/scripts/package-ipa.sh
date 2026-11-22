@@ -31,6 +31,9 @@ xcodebuild \
   build
 
 echo "==> [4/4] Packaging unsigned .ipa (for AltStore / SideStore / Sideloadly / Developer re-signing)..."
+plutil -extract NSSpeechRecognitionUsageDescription raw "${ARCHIVE_APP_DIR}/Info.plist" >/dev/null
+plutil -extract NSCameraUsageDescription raw "${ARCHIVE_APP_DIR}/Info.plist" >/dev/null
+plutil -extract NSAppTransportSecurity xml1 "${ARCHIVE_APP_DIR}/Info.plist" >/dev/null
 mkdir -p "${PAYLOAD_DIR}"
 cp -R "${ARCHIVE_APP_DIR}" "${PAYLOAD_DIR}/"
 (cd "${BUILD_DIR}" && zip -qr "${OUT_IPA}" Payload)

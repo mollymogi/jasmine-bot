@@ -12,20 +12,48 @@ public final class SpeechService {
     public var errorMessage: String?
     public var speakRepliesAloud = true
 
-    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
-    private var audioEngine = AVAudioEngine()
+    private lazy var speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
+    private lazy var audioEngine = AVAudioEngine()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private let synthesizer = AVSpeechSynthesizer()
+    private lazy var synthesizer = AVSpeechSynthesizer()
 
     public init() {}
 
-    public func requestPermissions() async -> Bool {
-        let speechStatus = await withCheckedContinuation { cont in
+    private nonisolated static func requestSpeechAuth() async -> SFSpeechRecognizerAuthorizationStatus {
+        await withCheckedContinuation { cont in
             SFSpeechRecognizer.requestAuthorization { status in
                 cont.resume(returning: status)
             }
         }
+    }
+
+    private nonisolated static func installAudioTap(
+        on inputNode: AVAudioInputNode,
+        format: AVAudioFormat,
+        request: SFSpeechAudioBufferRecognitionRequest
+    ) {
+        inputNode.removeTap(onBus: 0)
+        nonisolated(unsafe) let unsafeRequest = request
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            unsafeRequest.append(buffer)
+        }
+    }
+
+    private nonisolated static func startSpeechTask(
+        recognizer: SFSpeechRecognizer?,
+        request: SFSpeechAudioBufferRecognitionRequest,
+        onUpdate: @escaping @Sendable (String?, Bool) -> Void
+    ) -> SFSpeechRecognitionTask? {
+        recognizer?.recognitionTask(with: request) { result, error in
+            let latestText = result?.bestTranscription.formattedString
+            let shouldStop = error != nil || (result?.isFinal == true)
+            onUpdate(latestText, shouldStop)
+        }
+    }
+
+    public func requestPermissions() async -> Bool {
+        let speechStatus = await Self.requestSpeechAuth()
         guard speechStatus == .authorized else {
             errorMessage = "请在系统设置中开启「语音识别」权限"
             return false
@@ -62,20 +90,14 @@ public final class SpeechService {
 
             let inputNode = audioEngine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)
-            inputNode.removeTap(onBus: 0)
-            nonisolated(unsafe) let unsafeRequest = request
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-                unsafeRequest.append(buffer)
-            }
+            Self.installAudioTap(on: inputNode, format: recordingFormat, request: request)
 
             audioEngine.prepare()
             try audioEngine.start()
             transcript = ""
             isRecording = true
 
-            recognitionTask = speechRecognizer?.recognitionTask(with: request) { [weak self] result, error in
-                let latestText = result?.bestTranscription.formattedString
-                let shouldStop = error != nil || (result?.isFinal == true)
+            recognitionTask = Self.startSpeechTask(recognizer: speechRecognizer, request: request) { [weak self] latestText, shouldStop in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     if let latestText {

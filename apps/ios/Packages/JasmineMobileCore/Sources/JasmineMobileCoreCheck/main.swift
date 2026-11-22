@@ -75,6 +75,28 @@ struct JasmineMobileCoreCheck {
             check(false, "Expected .roomsUpdated")
         }
 
-        print("✅ All 5 JasmineMobileCore Swift 6 checks passed!")
+        // 6. Media extraction & Markdown table/code/file-link cleaning (Chinese path regression check)
+        let msg = ChatMessageItem(
+            id: "m1",
+            senderKind: "agent",
+            memberId: "agy-1",
+            speaker: "视频操作",
+            text: """
+            ### 粗剪产出
+            请查看 [ENTRANCE_5SHOTS_v3_白天营业版_粗剪.mp4](file:///Volumes/Spare/videoMake/Zeus_Bin_第二罐热牛奶_20261113/ENTRANCE_5SHOTS_v3_白天营业版_粗剪.mp4)，确认白天光感。
+
+            | 镜头 | 状态 |
+            |---|---|
+            | s01 | **通过** |
+            """
+        )
+        let extracted = msg.extractedMediaAttachments
+        check(extracted.count == 1 && extracted[0].kind == .video, "Extracted Chinese MP4 video attachment")
+        check(extracted[0].path == "/Volumes/Spare/videoMake/Zeus_Bin_第二罐热牛奶_20261113/ENTRANCE_5SHOTS_v3_白天营业版_粗剪.mp4", "Decoded local video path: \(extracted[0].path)")
+        check(!msg.cleanedMarkdownBody.contains("file:///Volumes/Spare"), "Cleaned verbose file:// URL from bubble text")
+        let blocks = ChatMessageItem.parseMarkdownBlocks(msg.cleanedMarkdownBody)
+        check(blocks.contains { if case .table(let h, _) = $0 { return h == ["镜头", "状态"] }; return false }, "Parsed Markdown table block")
+
+        print("✅ All 6 JasmineMobileCore checks passed!")
     }
 }
