@@ -1,0 +1,34 @@
+name: Build Jasmine Bot iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios-ipa.yml"
+
+jobs:
+  build-ipa:
+    name: Swift 6 Test & Build iOS 18 IPA
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16+
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Run JasmineMobileCore tests & package IPA
+        run: bash apps/ios/scripts/package-ipa.sh
+
+      - name: Upload JasmineBotIOS.ipa Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JasmineBotIOS-unsigned-ipa
+          path: apps/ios/build/JasmineBotIOS.ipa
+          retention-days: 30

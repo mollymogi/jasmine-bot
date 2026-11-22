@@ -1,0 +1,36 @@
+name: JasmineBotIOS
+options:
+  bundleIdPrefix: com.jasmine.bot
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+packages:
+  JasmineMobileCore:
+    path: Packages/JasmineMobileCore
+
+targets:
+  JasmineBotIOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: JasmineBotIOS
+        excludes:
+          - Info.plist
+    info:
+      path: JasmineBotIOS/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jasmine.bot.ios
+        PRODUCT_NAME: JasmineBot
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - package: JasmineMobileCore
+        product: JasmineMobileCore
