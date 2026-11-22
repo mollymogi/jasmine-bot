@@ -64,17 +64,22 @@ struct QRScannerSheet: UIViewControllerRepresentable {
             }
         }
 
-        func metadataOutput(
+        nonisolated func metadataOutput(
             _ output: AVCaptureMetadataOutput,
             didOutput metadataObjects: [AVMetadataObject],
             from connection: AVCaptureConnection
         ) {
-            guard !locked,
-                  let obj = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
-                  let value = obj.stringValue, !value.isEmpty else { return }
-            locked = true
-            session.stopRunning()
-            onCodeDetected?(value)
+            let scannedValue = (metadataObjects.first as? AVMetadataMachineReadableCodeObject)?.stringValue
+            guard let value = scannedValue, !value.isEmpty else { return }
+            Task { @MainActor [weak self] in
+                guard let self, !self.locked else { return }
+                self.locked = true
+                let captureSession = self.session
+                DispatchQueue.global(qos: .userInitiated).async {
+                    captureSession.stopRunning()
+                }
+                self.onCodeDetected?(value)
+            }
         }
     }
 }
