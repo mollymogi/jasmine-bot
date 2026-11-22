@@ -12,11 +12,11 @@ public final class SpeechService {
     public var errorMessage: String?
     public var speakRepliesAloud = true
 
-    private lazy var speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
-    private lazy var audioEngine = AVAudioEngine()
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private lazy var synthesizer = AVSpeechSynthesizer()
+    @ObservationIgnored private lazy var speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
+    @ObservationIgnored private lazy var audioEngine = AVAudioEngine()
+    @ObservationIgnored private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    @ObservationIgnored private var recognitionTask: SFSpeechRecognitionTask?
+    @ObservationIgnored private lazy var synthesizer = AVSpeechSynthesizer()
 
     public init() {}
 
