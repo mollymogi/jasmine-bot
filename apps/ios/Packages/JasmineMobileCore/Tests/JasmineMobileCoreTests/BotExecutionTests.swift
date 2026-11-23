@@ -5,9 +5,10 @@ import XCTest
 
 final class BotExecutionTests: XCTestCase {
     func testExecutionBindingUsesOnlyTheSelectedDevicesCatalogAndDirectory() throws {
-        let primary = Data(#"{"device":"host","defaultProject":"/host","clis":[{"id":"claude"}]}"#.utf8)
+        let primary = Data(#"{"device":"host","executionNodeId":"node-host","defaultProject":"/host","clis":[{"id":"claude"}]}"#.utf8)
         let workers = Data("""
         {"nodes":[
+          {"id":"node-host","label":"Host","authorized":true,"online":true},
           {"id":"node-one","label":"Linux","defaultCwd":"/work","authorized":true,"online":false,
            "catalog":{"clis":[{"id":"codex","installed":true,"models":[{"id":"model-x","source":"native"}]},
                               {"id":"missing","installed":false}]}},
@@ -15,7 +16,7 @@ final class BotExecutionTests: XCTestCase {
         ]}
         """.utf8)
         let devices = try BotExecutionDevice.decodeInventories(primary: primary, workers: workers)
-        XCTAssertEqual(devices.map(\.id), ["local", "node-one"])
+        XCTAssertEqual(devices.map(\.id), ["node-host", "node-one"])
         let linux = devices[1]
         XCTAssertFalse(linux.online)
         XCTAssertEqual(linux.clis.map(\.id), ["codex"])

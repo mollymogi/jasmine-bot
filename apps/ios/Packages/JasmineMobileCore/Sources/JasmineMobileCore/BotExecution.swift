@@ -23,6 +23,7 @@ public struct BotExecutionDevice: Identifiable, Hashable, Sendable {
 
     private struct Catalog: Decodable {
         var device: String?
+        var executionNodeId: String?
         var defaultProject: String?
         var clis: [BotCLIChoice]
     }
@@ -43,9 +44,10 @@ public struct BotExecutionDevice: Identifiable, Hashable, Sendable {
         }
         let host = try JSONDecoder().decode(Catalog.self, from: primary)
         let nodes = try JSONDecoder().decode(Nodes.self, from: workers)
-        return [Self(id: "local", label: host.device ?? "数据主机", online: true,
+        let hostID = host.executionNodeId ?? "local"
+        return [Self(id: hostID, label: host.device ?? "数据主机", online: true,
                      defaultCwd: host.defaultProject ?? "", clis: installed(host))]
-            + nodes.nodes.filter(\.authorized).map {
+            + nodes.nodes.filter { $0.authorized && $0.id != hostID }.map {
                 Self(id: $0.id, label: $0.label, online: $0.online == true,
                      defaultCwd: $0.defaultCwd ?? "", clis: installed($0.catalog))
             }
