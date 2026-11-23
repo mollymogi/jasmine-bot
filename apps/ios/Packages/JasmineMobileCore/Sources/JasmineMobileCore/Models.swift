@@ -203,6 +203,9 @@ public struct RoomMemberItem: Codable, Hashable, Identifiable, Sendable {
     public let cli: String?
     public let requestedModel: String?
     public let workerNodeId: String?
+    public let executionNodeId: String?
+    public let executionNodeLabel: String?
+    public let executionCwd: String?
 
     public var brand: AgentBrand {
         AgentBrand.resolve(cli: cli, model: requestedModel)

@@ -263,6 +263,26 @@ public actor JasmineAPIClient {
         return try JSONDecoder().decode(MobileBootstrapResponse.self, from: data)
     }
 
+    public func executionDevices() async throws -> [BotExecutionDevice] {
+        async let primaryResponse = authorizedRequest(path: "/api/chatrooms/catalog")
+        async let nodesResponse = authorizedRequest(path: "/api/worker-nodes")
+        let (primary, nodes) = try await (primaryResponse, nodesResponse)
+        return try BotExecutionDevice.decodeInventories(primary: primary, workers: nodes)
+    }
+
+    public func createBot(_ draft: BotCreationRequest) async throws -> ChatRoomSummary {
+        do {
+            let data = try await authorizedRequest(path: "/api/chatrooms", method: "POST", jsonBody: draft.payload)
+            return try JSONDecoder().decode(ChatRoomSummary.self, from: data)
+        } catch JasmineClientError.serverError(409, _) {
+            // The first route can accept a POST before its response is lost.
+            let data = try await authorizedRequest(path: "/api/chatrooms/\(draft.id)?slim=1&limit=1")
+            let existing = try JSONDecoder().decode(ChatRoomSummary.self, from: data)
+            guard draft.matches(existing) else { throw JasmineClientError.serverError(409, "会话已存在，请重新打开创建窗口") }
+            return existing
+        }
+    }
+
     public func fetchRoom(roomId: String, limit: Int = 80) async throws -> ChatRoomDetail {
         let data = try await authorizedRequest(path: "/api/chatrooms/\(roomId)?slim=1&limit=\(limit)")
         return try JSONDecoder().decode(ChatRoomDetail.self, from: data)

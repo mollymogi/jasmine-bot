@@ -3,6 +3,8 @@ import JasmineMobileCore
 
 struct ConversationsTabView: View {
     @Bindable var store: AppStoreModel
+    @State private var path: [ChatRoomSummary] = []
+    @State private var creatingBot = false
     @State private var searchText = ""
     @State private var filterKind: RoomFilter = .all
 
@@ -29,7 +31,7 @@ struct ConversationsTabView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -86,7 +88,7 @@ struct ConversationsTabView: View {
                         ContentUnavailableView(
                             "暂无匹配的会话",
                             systemImage: "bubble.left.and.text.bubble.right",
-                            description: Text("下拉刷新，或在桌面端新建 Bot / 群聊后实时同步到这里")
+                            description: Text("调整筛选条件，或点右上角的加号创建 Bot")
                         )
                     }
                 }
@@ -94,10 +96,20 @@ struct ConversationsTabView: View {
             .navigationTitle("Jasmine Bot")
             .searchable(text: $searchText, prompt: "搜索 Bot、群聊或项目目录")
             .toolbar {
-                ToolbarItem(placement: .automatic) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("创建 Bot", systemImage: "plus") { creatingBot = true }
+                }
+                ToolbarItem(placement: .topBarLeading) {
                     RouteStatusPill(outcome: store.activeRoute) {
                         Task { await store.reraceRoutesSilently() }
                     }
+                }
+            }
+            .sheet(isPresented: $creatingBot) {
+                CreateBotView(client: store.client) { room in
+                    creatingBot = false
+                    path.append(room)
+                    Task { await store.refreshAll() }
                 }
             }
             .navigationDestination(for: ChatRoomSummary.self) { room in
@@ -152,7 +164,13 @@ private struct RoomRowView: View {
                     }
                 }
 
-                if let proj = room.project, !proj.isEmpty {
+                if room.isDirectBot, let bot = room.members?.first, let cli = bot.cli {
+                    Label("\(bot.executionNodeLabel ?? bot.executionNodeId ?? bot.workerNodeId ?? "数据主机") · \(cli)",
+                          systemImage: "terminal")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else if let proj = room.project, !proj.isEmpty {
                     Text((proj as NSString).lastPathComponent)
                         .font(.caption)
                         .foregroundStyle(.secondary)

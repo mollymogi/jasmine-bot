@@ -97,6 +97,14 @@ struct JasmineMobileCoreCheck {
         let blocks = ChatMessageItem.parseMarkdownBlocks(msg.cleanedMarkdownBody)
         check(blocks.contains { if case .table(let h, _) = $0 { return h == ["镜头", "状态"] }; return false }, "Parsed Markdown table block")
 
-        print("✅ All 6 JasmineMobileCore checks passed!")
+        let executionDevices = try BotExecutionDevice.decodeInventories(
+            primary: Data(#"{"device":"storage","clis":[{"id":"codex"}]}"#.utf8),
+            workers: Data(#"{"nodes":[{"id":"linux","label":"Linux","authorized":true,"defaultCwd":"/work","catalog":{"clis":[{"id":"claude","installed":true}]}},{"id":"pending","label":"Pending","authorized":false}]}"#.utf8)
+        )
+        check(executionDevices.map(\.id) == ["local", "linux"], "Authorized devices are selectable")
+        check(executionDevices.last?.clis.map(\.id) == ["claude"], "CLI inventory is device-specific")
+        check(executionDevices.last?.defaultCwd == "/work", "Execution directory belongs to the worker")
+
+        print("✅ All 7 JasmineMobileCore checks passed!")
     }
 }
