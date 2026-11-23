@@ -92,10 +92,10 @@ struct HostStatusTabView: View {
 
                 Section("在线电脑节点 (Primary & Followers)") {
                     HStack {
-                        Image(systemName: "macmini.fill")
+                        Image(systemName: "desktopcomputer")
                             .foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading) {
-                            Text(store.hostSummary?.hostname ?? store.credentials?.hostLabel ?? "主控 Mac")
+                            Text(store.hostSummary?.hostname ?? store.credentials?.hostLabel ?? "数据主机")
                                 .font(.subheadline.weight(.semibold))
                             Text("Primary 主控中枢 · 记忆与会话唯一真相源")
                                 .font(.caption2)
